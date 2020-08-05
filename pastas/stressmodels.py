@@ -50,7 +50,8 @@ from .utils import validate_name
 logger = getLogger(__name__)
 
 __all__ = ["StressModel", "StressModel2", "Constant", "StepModel",
-           "LinearTrend", "FactorModel", "RechargeModel", "WellModel"]
+           "LinearTrend", "FactorModel", "RechargeModel", "WellModel",
+           "TarsoModel"]
 
 
 class StressModelBase:
@@ -711,6 +712,10 @@ class WellModel(StressModelBase):
             raise NotImplementedError("WellModel only supports the rfunc "
                                       "HantushWellModel fow now!")
 
+        logger.warn("It is recommended to use LmfitSolve as the solver "
+                    "when implementing WellModel. See "
+                    "https://github.com/pastas/pastas/issues/177.")
+
         # sort wells by distance
         self.sort_wells = sort_wells
         if self.sort_wells:
@@ -748,13 +753,14 @@ class WellModel(StressModelBase):
 
     def set_init_parameters(self):
         self.parameters = self.rfunc.get_init_parameters(self.name)
-        # ensure lambda can't get too small
-        # r/lambda <= 702 else get_tmax() will yield np.inf
-        self.parameters.loc[self.name + "_lab", "pmin"] = \
-            np.max(self.distances) / 702.
-        # set initial lambda to largest distance
-        self.parameters.loc[self.name + "_lab", "initial"] = \
-            np.max(self.distances)
+        # ensure lambda can't get too small or too large
+        self.parameters.loc[self.name + "_b", "pmax"] /= \
+            np.max(self.distances) ** 2
+        self.parameters.loc[self.name + "_b", "pmin"] /= \
+            np.max(self.distances) ** 2
+        # set initial value with mean distance
+        self.parameters.loc[self.name + "_b", "initial"] /= \
+            np.mean(self.distances) ** 2
 
     def simulate(self, p=None, tmin=None, tmax=None, freq=None, dt=1,
                  istress=None):
@@ -1369,7 +1375,7 @@ class TarsoModel(RechargeModel):
         return data
 
     @staticmethod
-    def check_stressmodel_compatibility(ml):
+    def _check_stressmodel_compatibility(ml):
         """Internal method to check if no other stressmodels, a constants or a
         transform is used."""
         msg = "A TarsoModel cannot be combined with {}. Either remove the" \

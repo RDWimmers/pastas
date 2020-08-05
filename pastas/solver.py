@@ -50,11 +50,6 @@ class BaseSolver:
         The object returned by the minimization method that is used. It depends
         on the solver what is actually returned.
 
-    Methods
-    -------
-    misfit
-    get_correlations
-
     """
 
     def __init__(self, ml, pcov=None, nfev=None, obj_func=None, **kwargs):
@@ -63,15 +58,16 @@ class BaseSolver:
         if pcov is None:
             self.pcor = None  # Correlation between parameters
         else:
-            self.pcor = self.get_correlations(pcov)
+            self.pcor = self._get_correlations(pcov)
         self.nfev = nfev  # number of function evaluations
         self.obj_func = obj_func
         self.result = None  # Object returned by the optimization method
 
-    def misfit(self, parameters, noise, weights=None, callback=None):
+    def misfit(self, parameters, noise, weights=None, callback=None,
+               returnseparate=False):
         """This method is called by all solvers to obtain a series that are
         minimized in the optimization proces. It handles the application of
-        the weigths, a noisemodel and other optimization options.
+        the weights, a noisemodel and other optimization options.
 
         Parameters
         ----------
@@ -84,6 +80,7 @@ class BaseSolver:
         callback: ufunc, optional
             function that is called after each iteration. the parameters are
             provided to the func. E.g. "callback(parameters)"
+        returnseparate: return residuals, noise, noiseweights
 
         Returns
         -------
@@ -93,7 +90,7 @@ class BaseSolver:
         """
         # Get the residuals or the noise
         if noise:
-            rv = self.ml.noise(parameters, weights=False) * \
+            rv = self.ml.noise(parameters) * \
                  self.ml.noise_weights(parameters)
         else:
             rv = self.ml.residuals(parameters)
@@ -106,6 +103,11 @@ class BaseSolver:
 
         if callback:
             callback(parameters)
+
+        if returnseparate:
+            return self.ml.residuals(parameters).values, \
+                   self.ml.noise(parameters).values, \
+                   self.ml.noise_weights(parameters).values
 
         return rv.values
 
@@ -128,8 +130,8 @@ class BaseSolver:
 
         sigr = self.ml.residuals().std()
 
-        data = self.get_realizations(func=self.ml.simulate, n=n, name=None,
-                                     **kwargs)
+        data = self._get_realizations(func=self.ml.simulate, n=n, name=None,
+                                      **kwargs)
         data = data + sigr * np.random.randn(data.shape[0], data.shape[1])
 
         q = [alpha / 2, 1 - alpha / 2]
@@ -150,31 +152,32 @@ class BaseSolver:
         95% confidence interval.
 
         """
-        return self.get_confidence_interval(func=self.ml.simulate, n=n,
-                                            alpha=alpha, **kwargs)
+        return self._get_confidence_interval(func=self.ml.simulate, n=n,
+                                             alpha=alpha, **kwargs)
 
     def ci_block_response(self, name, n=1000, alpha=0.05, **kwargs):
         dt = self.ml.get_block_response(name=name).index.values
-        return self.get_confidence_interval(func=self.ml.get_block_response,
-                                            n=n, alpha=alpha, name=name, dt=dt,
-                                            **kwargs)
+        return self._get_confidence_interval(func=self.ml.get_block_response,
+                                             n=n, alpha=alpha, name=name,
+                                             dt=dt, **kwargs)
 
     def ci_step_response(self, name, n=1000, alpha=0.05, **kwargs):
         dt = self.ml.get_block_response(name=name).index.values
-        return self.get_confidence_interval(func=self.ml.get_step_response,
-                                            n=n, alpha=alpha, name=name,
-                                            dt=dt, **kwargs)
+        return self._get_confidence_interval(func=self.ml.get_step_response,
+                                             n=n, alpha=alpha, name=name,
+                                             dt=dt, **kwargs)
 
     def ci_contribution(self, name, n=1000, alpha=0.05, **kwargs):
-        return self.get_confidence_interval(func=self.ml.get_contribution, n=n,
-                                            alpha=alpha, name=name, **kwargs)
+        return self._get_confidence_interval(func=self.ml.get_contribution,
+                                             n=n, alpha=alpha, name=name,
+                                             **kwargs)
 
-    def get_realizations(self, func, n=None, name=None, **kwargs):
+    def _get_realizations(self, func, n=None, name=None, **kwargs):
         """Internal method to obtain  n number of realizations."""
         if name:
             kwargs["name"] = name
 
-        params = self.get_parameter_sample(n=n, name=name)
+        params = self._get_parameter_sample(n=n, name=name)
         data = {}
 
         for i, param in enumerate(params):
@@ -182,15 +185,15 @@ class BaseSolver:
 
         return DataFrame.from_dict(data, orient="columns")
 
-    def get_confidence_interval(self, func, n=None, name=None, alpha=0.05,
-                                **kwargs):
+    def _get_confidence_interval(self, func, n=None, name=None, alpha=0.05,
+                                 **kwargs):
         """Internal method to obtain a confidence interval."""
         q = [alpha / 2, 1 - alpha / 2]
-        data = self.get_realizations(func=func, n=n, name=name, **kwargs)
+        data = self._get_realizations(func=func, n=n, name=name, **kwargs)
 
         return data.quantile(q=q, axis=1).transpose()
 
-    def get_parameter_sample(self, name=None, n=None):
+    def _get_parameter_sample(self, name=None, n=None):
         """Internal method to obtain a parameter sets.
 
         Parameters
@@ -209,7 +212,7 @@ class BaseSolver:
 
         """
         par = self.ml.get_parameters(name=name)
-        pcov = self.get_covariance_matrix(name=name)
+        pcov = self._get_covariance_matrix(name=name)
 
         if name is None:
             p = self.ml.parameters
@@ -241,7 +244,7 @@ class BaseSolver:
 
         return samples[:n, :]
 
-    def get_covariance_matrix(self, name=None):
+    def _get_covariance_matrix(self, name=None):
         """Internal method to obtain the covariance matrix from the model.
 
         Parameters
@@ -267,9 +270,9 @@ class BaseSolver:
         return pcov
 
     @staticmethod
-    def get_correlations(pcov):
-        """Method to obtain the parameter correlations from the covariance
-        matrix.
+    def _get_correlations(pcov):
+        """Internal method to obtain the parameter correlations from the
+        covariance matrix.
 
         Parameters
         ----------
@@ -338,10 +341,10 @@ class LeastSquares(BaseSolver):
                                     x0=parameters.initial.values,
                                     args=(noise, weights, callback), **kwargs)
 
-        self.pcov = DataFrame(self.get_covariances(self.result.jac,
-                                                   self.result.cost),
+        self.pcov = DataFrame(self._get_covariances(self.result.jac,
+                                                    self.result.cost),
                               index=parameters.index, columns=parameters.index)
-        self.pcor = self.get_correlations(self.pcov)
+        self.pcor = self._get_correlations(self.pcov)
         self.nfev = self.result.nfev
         self.obj_func = self.result.cost
 
@@ -359,8 +362,8 @@ class LeastSquares(BaseSolver):
         p[self.vary] = parameters
         return self.misfit(p, noise, weights, callback)
 
-    def get_covariances(self, jacobian, cost, absolute_sigma=False):
-        """Method to get the covariance matrix from the jacobian.
+    def _get_covariances(self, jacobian, cost, absolute_sigma=False):
+        """Internal method to get the covariance matrix from the jacobian.
 
         Parameters
         ----------
@@ -455,7 +458,7 @@ class LmfitSolve(BaseSolver):
 
         names = self.result.var_names
         self.pcov = DataFrame(pcov, index=names, columns=names)
-        self.pcor = self.get_correlations(self.pcov)
+        self.pcor = self._get_correlations(self.pcov)
 
         # Set all optimization attributes
         self.nfev = self.result.nfev
@@ -478,3 +481,79 @@ class LmfitSolve(BaseSolver):
     def objfunction(self, parameters, noise, weights, callback):
         param = np.array([p.value for p in parameters.values()])
         return self.misfit(param, noise, weights, callback)
+
+
+class LmfitSolveNew(BaseSolver):
+    _name = "LmfitSolve"
+
+    def __init__(self, ml, pcov=None, nfev=None, **kwargs):
+        """Solving the model using the LmFit solver [LM]_.
+
+         This is basically a wrapper around the scipy solvers, adding some
+         cool functionality for boundary conditions.
+
+        References
+        ----------
+        .. [LM] https://github.com/lmfit/lmfit-py/
+        """
+        try:
+            global lmfit
+            import lmfit as lmfit  # Import Lmfit here, so it is no dependency
+        except ImportError:
+            msg = "lmfit not installed. Please install lmfit first."
+            raise ImportError(msg)
+        BaseSolver.__init__(self, ml=ml, pcov=pcov, nfev=nfev, **kwargs)
+
+    def solve(self, noise=True, weights=None, callback=None, method="leastsq",
+              **kwargs):
+
+        # Deal with the parameters
+        parameters = lmfit.Parameters()
+        p = self.ml.parameters.loc[:, ['initial', 'pmin', 'pmax', 'vary']]
+        for k in p.index:
+            pp = np.where(p.loc[k].isnull(), None, p.loc[k])
+            parameters.add(k, value=pp[0], min=pp[1], max=pp[2], vary=pp[3])
+
+        # Create the Minimizer object and minimize
+        self.mini = lmfit.Minimizer(userfcn=self.objfunction, calc_covar=True,
+                                    fcn_args=(noise, weights, callback),
+                                    params=parameters, **kwargs)
+        self.result = self.mini.minimize(method=method)
+
+        # Set all parameter attributes
+        pcov = None
+        if hasattr(self.result, "covar"):
+            if self.result.covar is not None:
+                pcov = self.result.covar
+
+        names = self.result.var_names
+        self.pcov = DataFrame(pcov, index=names, columns=names)
+        self.pcor = self._get_correlations(self.pcov)
+
+        # Set all optimization attributes
+        self.nfev = self.result.nfev
+        self.obj_func = self.result.chisqr
+
+        if hasattr(self.result, "success"):
+            success = self.result.success
+        else:
+            success = True
+        optimal = np.array([p.value for p in self.result.params.values()])
+        stderr = np.array([p.stderr for p in self.result.params.values()])
+
+        idx = None
+        if "is_weighted" in kwargs:
+            if not kwargs["is_weighted"]:
+                idx = -1
+
+        return success, optimal[:idx], stderr[:idx]
+
+    def objfunction(self, parameters, noise, weights, callback):
+        param = np.array([p.value for p in parameters.values()])
+        res, noise, weights = self.misfit(param, noise, weights, callback,
+                                          returnseparate=True)
+        var_res = np.var(res, ddof=1)
+        weighted_noise = noise * weights
+        extraterm = np.sum(np.log(var_res / weights ** 2))
+        rv = np.sum(weighted_noise ** 2) / var_res + extraterm
+        return rv
